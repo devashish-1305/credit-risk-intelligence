@@ -50,5 +50,12 @@ Details are in `docs/dq_notes.md`.
    - It runs only after the user clicks "Run Query".
    - The query is shown to the user, and the answer is grounded only in the execution result.
 4. **Imputation scope:** the ingest imputation is for analytics only. Sub-problem 4 refits all imputation on the train data only, inside the model pipeline. Ingest keeps the `_missing` flags, so raw missingness can be recovered.
+   - **Bureau DPD:** the master table aggregates the *raw* bureau DPD, with the ingest imputation undone, and keeps a `bur_*_dpd_missing_cnt` count.
+     - LightGBM uses these as-is, with NaN plus the missing flags.
+     - Logistic regression uses an imputer fit on the train data only.
+     - The other customer columns imputed in ingest are reset to NaN where their `_missing` flag = 1 before model fitting, and the same rule applies to them.
 5. **Storage:** processed tables are written as parquet (pyarrow).
 6. **No collections features in the model** (leakage).
+7. **Settled after review of sub-problem 1:**
+   - The repayment window stays at months 1–3. The diagnostic is in assumptions A4.
+   - Labels stay as spelled in the CSV.
