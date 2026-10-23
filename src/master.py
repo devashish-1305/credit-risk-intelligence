@@ -2,7 +2,7 @@
 
 loan_accounts (base) <- customers on customer_id
                      <- bureau aggregates: all lines (bur_*, per customer)
-                        and point-in-time lines (bur_pit_*, per account)
+                        and opened-before-origination lines (bur_pit_*, per account)
                      <- repayment months 1-3 aggregates (rep_m3_*)
                      <- collections aggregates (coll_*, analytics only)
 """
@@ -107,7 +107,8 @@ def build_master(clean):
                 right_index=True, how="left")
     m = _fill_thin_file(m, "bur_")
 
-    # Bureau, point-in-time variant: lines opened on/before this account's origination.
+    # Bureau, opened-before-origination sensitivity variant: lines opened on/before this
+    # account's origination. Status, balance and DPD are still snapshot values.
     pairs = bureau.merge(loans[["account_id", "customer_id", "origination_date"]], on="customer_id")
     pit = pairs[pairs["date_opened"] <= pairs["origination_date"]]
     m = m.merge(agg_bureau(pit, "account_id", "bur_pit_"), left_on="account_id",

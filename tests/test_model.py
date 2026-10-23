@@ -1,12 +1,15 @@
+import lightgbm as lgb
 import numpy as np
 import pandas as pd
 import pytest
 
 from src.ingest import PROCESSED_DIR
 from src.master import COLLECTIONS_COLS
-from src.model import CATEGORICAL, EXCLUDED, TARGET, run
+from src.model import (BAND_QUANTILES, CATEGORICAL, EXCLUDED, TARGET, TRAIN_MAX_YEAR, VALID_YEAR,
+                       band_table, prepare, run)
 
 MODELS = ["lr", "lgbm", "lgbm_pit"]
+ROW_KEY = ["loan_amount", "annual_income", "age", "loan_to_income"]  # numeric, in every feature set
 
 
 @pytest.fixture(scope="module")
@@ -56,3 +59,46 @@ def test_shap_explanations_add_up_to_model_predictions(out):
     raw = out["models"]["lgbm"].predict_proba(out["X_test_lgbm"], raw_score=True)
     recon = out["shap_base"] + out["shap_values"].sum(axis=1)
     np.testing.assert_allclose(recon, raw, atol=1e-4)
+
+
+def test_lr_contributions_add_up_to_log_odds(out):
+    lr, feats = out["models"]["lr"], out["features"]["lr"]
+    log_odds = lr.decision_function(out["test"][feats])
+    np.testing.assert_allclose(out["lr_contrib"].sum(axis=1) + out["lr_base"], log_odds, atol=1e-8)
+    d = out["lr_drivers"]
+    assert d["account_id"].nunique() == len(out["test"]) and (d.groupby("account_id").size() == 5).all()
+    assert ((d["contribution"] > 0) == (d["direction"] == "raises risk")).all()
+
+
+def test_risk_bands_learned_on_train_lr_scores(out):
+    np.testing.assert_allclose(out["band_thresholds"], np.quantile(out["train_scores"]["lr"], BAND_QUANTILES))
+    assert len(out["test_band"]) == len(out["test"]) and not pd.isna(out["test_band"]).any()
+    assert band_table(out["train"][TARGET], out["train_band"])["default_rate"].is_monotonic_increasing
+
+
+def _row_keys(X):
+    return set(pd.util.hash_pandas_object(X[ROW_KEY], index=False))
+
+
+def test_lgbm_early_stopping_and_refit_see_only_train_years(monkeypatch):
+    master = pd.read_parquet(PROCESSED_DIR / "master.parquet")
+    df = prepare(master)
+    year = df["origination_date"].dt.year
+    train_keys, test_keys = _row_keys(df[year <= TRAIN_MAX_YEAR]), _row_keys(df[year > TRAIN_MAX_YEAR])
+    val_keys = _row_keys(df[year == VALID_YEAR])
+    assert not train_keys & test_keys  # the key tells the periods apart
+
+    seen, fit = [], lgb.LGBMClassifier.fit
+
+    def spy(self, X, y, **kwargs):
+        seen.append(("fit", _row_keys(X)))
+        seen.extend(("eval", _row_keys(Xe)) for Xe, _ in kwargs.get("eval_set") or [])
+        return fit(self, X, y, **kwargs)
+
+    monkeypatch.setattr(lgb.LGBMClassifier, "fit", spy)
+    run(master)
+    assert {kind for kind, _ in seen} == {"fit", "eval"}
+    for kind, keys in seen:
+        assert keys <= train_keys and not keys & test_keys
+        if kind == "eval":
+            assert keys <= val_keys
