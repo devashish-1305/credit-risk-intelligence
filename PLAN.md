@@ -56,6 +56,9 @@ Details are in `docs/dq_notes.md`.
      - The other customer columns imputed in ingest are reset to NaN where their `_missing` flag = 1 before model fitting, and the same rule applies to them.
 5. **Storage:** processed tables are written as parquet (pyarrow).
 6. **No collections features in the model** (leakage).
-7. **Settled after review of sub-problem 1:**
+7. **Model build (sub-problem 4):**
+   - The LightGBM tree count is chosen by early stopping on the 2021 vintage inside the training data, then the model is refit on all of 2018–21. This was added because the data showed severe overfitting at 300 trees. There is no other tuning.
+   - `gender` and `marital_status` are excluded from model inputs (A7).
+8. **Settled after review of sub-problem 1:**
    - The repayment window stays at months 1–3. The diagnostic is in assumptions A4.
    - Labels stay as spelled in the CSV.
