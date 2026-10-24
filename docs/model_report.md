@@ -81,12 +81,14 @@ Decile 1 is the highest score.
 ## Risk bands (LR champion)
 The dashboard will show **risk bands, not probabilities**. The cut points are the 40th, 70th and 90th percentiles of the **training-period** LR scores (0.123, 0.184, 0.281). They were fixed on train and applied unchanged to the test accounts.
 
-| Band | Train share | Train default rate | Test share | Test default rate |
-|---|---|---|---|---|
-| Low | 40.0% | 9.1% | 39.4% | 8.6% |
-| Medium | 30.0% | 14.2% | 30.4% | 14.0% |
-| High | 20.0% | 22.8% | 19.7% | 23.4% |
-| Very High | 10.0% | 37.6% | 10.4% | 34.7% |
+| Band | Train share | Train default rate | Test share | Test default rate | Share of defaulted exposure (test) |
+|---|---|---|---|---|---|
+| Low | 40.0% | 9.1% | 39.4% | 8.6% | 11.3% |
+| Medium | 30.0% | 14.2% | 30.4% | 14.0% | 16.6% |
+| High | 20.0% | 22.8% | 19.7% | 23.4% | 28.6% |
+| Very High | 10.0% | 37.6% | 10.4% | 34.7% | 43.4% |
+
+High + Very High: 30.1% of test accounts, 51.9% of defaults, 72.1% of defaulted exposure (sum of loan_amount for defaults). Part of the dollar concentration is a loan-size effect: the top loan_amount quartile both scores higher (mean LR score 0.193 vs about 0.15 for Q1–Q3) and defaults more (19.3% vs 13.3–15.7%).
 
 ## Calibration
 **No formal calibration was done** (no Platt or isotonic step, and no calibration test). Scores are used for ranking and banding. Diagnostic only, on test:
