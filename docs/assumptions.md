@@ -10,7 +10,15 @@
 | A6 | `customer_since` is unreliable. 50% of loans predate it, so it is not used as a feature. | Data contradiction | A real relationship-tenure feature is lost |
 | A7 | `gender` and `marital_status` are excluded from model inputs; `age` is kept. Excluding them does not establish fairness, and no regulatory-compliance claim is made. | Common fair-lending practice | Age-band disparities are material (see the fairness section of `docs/model_report.md`); a review may require removing or constraining `age` |
 
-## What a real bank's IT/data team would need to provide
-- Bureau pulls **as of the decision date**: point-in-time archives, not the current snapshot.
-- A default definition and default date, such as 90+ DPD or a write-off, with its observation window.
-- A data-end and refresh schedule for each source system, plus the key mappings across systems.
+## What a bank's IT/data team would need to provide
+- **As-of-date bureau pulls:** point-in-time archives at the decision date, not the current snapshot (A2).
+- **A dated default definition with horizon:** for example 90+ DPD or a write-off, with its default date and observation window (A4).
+- **Recovery / LGD data:** recoveries, collateral values and write-off dates, so loss severity can be modelled.
+- **Data dictionary and lineage:** field definitions, key mappings across systems, and a data-end and refresh schedule per source.
+- **Secure data access:** governed, least-privilege access to source tables in the bank's environment.
+- **Model-risk validation sign-off:** independent validation of the model, its monitoring plan and the fairness review before any use.
+- **PII handling rules:** which fields may be used, masked or retained, and how identifiers are treated in logs and the dashboard.
+- **LLM provider approval:** approval of the provider and its data-sharing and retention terms before Ask the Portfolio is enabled.
+
+## Interpretation of reported rates
+Risk-band default rates (Low 8.6%, Medium 14.0%, High 23.4%, Very High 34.7%) are **test-set evaluation results** on 4,921 accounts originated 2022–23. They are not guarantees or forecasts for future borrowers, and they inherit the optimism noted in L4 of `docs/limitations.md`.

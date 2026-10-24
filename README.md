@@ -101,6 +101,8 @@ data/processed/        pipeline outputs (generated)
 ## Documentation
 
 - [PLAN.md](PLAN.md): sub-problems and locked design decisions
+- [docs/product_brief.md](docs/product_brief.md): one-page brief (problem, users, scope, success measures)
+- [docs/architecture.md](docs/architecture.md): pipeline and Ask the Portfolio diagram, controls, production path
 - [docs/DATA_DICTIONARY.md](docs/DATA_DICTIONARY.md): source schema
 - [docs/dq_notes.md](docs/dq_notes.md): data-quality findings and fixes
 - [docs/assumptions.md](docs/assumptions.md): assumptions log
