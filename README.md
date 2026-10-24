@@ -48,6 +48,8 @@ pip install -r requirements.txt
 brew install libomp          # macOS only: LightGBM needs OpenMP
 ```
 
+If you use Anaconda, run conda deactivate before activating .venv, or use the python -m forms above.
+
 ### Data
 
 The raw data is **not included in the repository**. Put the 5 CSVs in `data/raw/`:
@@ -78,8 +80,8 @@ Without a key, the tab shows a message and the rest of the dashboard works norma
 
 ```bash
 python -m src.run_all          # ingest → master → analytics → model → validation (about 15 s)
-pytest -q                      # tests (the language model is mocked; no API key needed)
-streamlit run app/app.py       # dashboard
+python -m pytest -q            # tests (the language model is mocked; no API key needed)
+python -m streamlit run app/app.py   # dashboard
 ```
 
 `run_all` stops with a clear message if any raw CSV is missing. Each stage can also be run on its own,
