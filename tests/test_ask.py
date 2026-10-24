@@ -16,6 +16,7 @@ def df():
     n = 120
     return pd.DataFrame({
         "account_id": [f"ACC{i:06d}" for i in range(n)],
+        "customer_id": [f"CUST{i:06d}" for i in range(n)],
         "region": ["North", "South", "East"] * (n // 3),
         "loan_type": ["Auto Loan", "Mortgage"] * (n // 2),
         "employment_type": ["Salaried"] * n,
@@ -76,6 +77,68 @@ def test_allow_list_rejects_unsafe_or_unknown(expr, df):
 def test_method_chain_bypass_is_rejected(expr, df):
     with pytest.raises(ask.AskError):
         ask.validate(expr, df)
+
+
+@pytest.mark.parametrize("expr", [
+    "df.groupby('region')['loan_amount'].agg('transform')",                   # non-allow-listed name in .agg
+    "df.groupby('region')['loan_amount'].agg(['mean', 'pipe'])",
+    "df.groupby('region').agg(n=('loan_amount', 'transform'))",               # ... in a named-agg tuple
+    "df.pivot_table(index='region', values='loan_amount', aggfunc='cumsum')",  # ... in pivot_table aggfunc
+    "df.groupby('region')['loan_amount'].agg('loan_amount')",                 # column name as agg function
+    "df.groupby('region').agg(n=('loan_amount', 'region'))",
+    "df.pivot_table(index='region', values='loan_amount', aggfunc=['mean', 'loan_type'])",
+    "df.sort_values('loan_amount', ignore_index=True)",                       # unknown keyword arguments
+    "df.groupby('region', as_index=False)['loan_amount'].sum()",
+    "df['loan_amount'].sum().round(decimals=2, out=1)",
+    "df.sort_values('mean')",                                                 # agg name outside agg context
+    "df.sort_values('loan_amount', ascending='ascending')",                   # keyword name used as a string
+])
+def test_string_and_keyword_policy_rejects(expr, df):
+    with pytest.raises(ask.AskError):
+        ask.validate(expr, df)
+
+
+@pytest.mark.parametrize("expr", [
+    "df.groupby('region')['loan_amount'].agg(['mean', 'count'])",
+    "df.pivot_table(index='region', columns='loan_type', values='target_default', aggfunc='mean')",
+    "df.groupby('region')['loan_amount'].sum().nlargest(n=2).round(decimals=1)",
+    "df['region'].value_counts(normalize=True).head(n=3)",
+])
+def test_string_and_keyword_policy_accepts(expr, df):
+    ask.validate(expr, df)
+
+
+@pytest.mark.parametrize("expr", [
+    "df['customer_id'].max()",
+    "df.groupby('account_id')['loan_amount'].sum().idxmax()",          # idxmax returning an account ID
+    "df.groupby('account_id')['loan_amount'].sum().nlargest(5)",       # result indexed by account_id
+])
+def test_identifier_queries_never_reach_the_answer_model(expr, df):
+    result, truncated = ask.run_query(expr, df)  # accepted by the validator, so safe to run
+    client = FakeClient()
+    answer = ask.answer_question("q", result, len(df), client, truncated, ask.uses_scores(expr),
+                                 ask.uses_identifiers(expr))
+    assert answer == ask.ID_MESSAGE and client.calls == []
+
+
+def test_row_series_identifiers_are_not_sent(df):
+    expr = "df.loc[df['loan_amount'].idxmax()]"  # a whole row as a Series; no ID column named
+    result, truncated = ask.run_query(expr, df)
+    assert not ask.uses_identifiers(expr) and result["account_id"] == "ACC000119"  # UI keeps the full row
+    client = FakeClient(reply="The largest loan is 120,000.")
+    ask.answer_question("Largest loan?", result, len(df), client, truncated, ask.uses_scores(expr),
+                        ask.uses_identifiers(expr))
+    prompt = client.calls[0]["messages"][0]["content"]
+    assert "ACC0" not in prompt and "CUST0" not in prompt and "account_id" not in prompt
+    assert "120000" in prompt
+
+
+def test_query_prompt_lists_keywords_and_counting_rule(df):
+    client = FakeClient(reply=reply())
+    ask.generate_query("q", df, client)
+    system = client.calls[0]["system"]
+    assert "sort_values(ascending, by)" in system and "pivot_table(aggfunc, columns, index, values)" in system
+    assert "groupby(...).size()" in system and "Never use the account_id or customer_id columns" in system
 
 
 def test_valid_expression_runs_on_fixture(df):

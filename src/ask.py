@@ -36,6 +36,20 @@ ALLOWED_METHODS = {
 }
 ALLOWED_ATTRS = {"loc", "dt", "year", "month", "quarter"}  # non-call attribute access
 AGG_NAMES = {"mean", "sum", "count", "size", "min", "max", "median", "std", "nunique", "first", "last"}
+AGG_METHODS = {"agg", "aggregate"}  # keyword names here are named-aggregation aliases
+# Keyword arguments allowed per method; any other keyword is rejected.
+ALLOWED_KEYWORDS = {
+    "sort_values": {"by", "ascending"},
+    "sort_index": {"ascending"},
+    "value_counts": {"normalize", "ascending", "dropna"},
+    "head": {"n"}, "tail": {"n"},
+    "nlargest": {"n", "columns"}, "nsmallest": {"n", "columns"},
+    "reset_index": {"drop"},
+    "round": {"decimals"},
+    "pivot_table": {"index", "columns", "values", "aggfunc"},
+}
+ID_MESSAGE = ("This query uses account or customer identifiers, so the result is shown in the table only "
+              "and not sent to the answer model.")
 ALLOWED_NODES = (
     ast.Expression, ast.Call, ast.Attribute, ast.Name, ast.Load, ast.Subscript, ast.Slice,
     ast.Constant, ast.List, ast.Tuple, ast.keyword, ast.Compare, ast.BoolOp, ast.BinOp, ast.UnaryOp,
@@ -43,7 +57,7 @@ ALLOWED_NODES = (
     ast.Eq, ast.NotEq, ast.Lt, ast.LtE, ast.Gt, ast.GtE,
     ast.Add, ast.Sub, ast.Mult, ast.Div, ast.FloorDiv, ast.Mod,
 )
-_DATE = re.compile(r"^\d{4}-\d{2}(-\d{2})?$")
+_ID_REF = re.compile(r"\b(" + "|".join(ID_COLS) + r")\b")
 
 
 class AskError(Exception):
@@ -82,11 +96,43 @@ def schema_text(df):
 
 # --- validation -------------------------------------------------------------
 
-def _allowed_strings(df, tree):
-    aliases = {kw.arg for node in ast.walk(tree) if isinstance(node, ast.Call)
-               for kw in node.keywords if kw.arg}
-    values = {v for vals in categorical_values(df).values() for v in vals}
-    return set(map(str, df.columns)) | AGG_NAMES | aliases | values
+def _agg_funcs(node):
+    """String constants in an aggregation-function position: one name, or a list/tuple of names."""
+    elts = node.elts if isinstance(node, (ast.List, ast.Tuple)) else [node]
+    if not elts or not all(isinstance(e, ast.Constant) and isinstance(e.value, str) for e in elts):
+        raise AskError("Aggregation functions must be given by name, e.g. 'mean' or ['mean', 'count'].")
+    for e in elts:
+        if e.value not in AGG_NAMES:
+            raise AskError(f"'{e.value}' is not an allowed aggregation; use one of {sorted(AGG_NAMES)}.")
+    return elts
+
+
+def _check_call(node, columns):
+    """Check a call's keywords and aggregation arguments. Returns (aggregation-name constants, aliases)."""
+    method = node.func.attr
+    funcs, aliases = [], set()
+    if method in AGG_METHODS:
+        for arg in node.args:
+            funcs += _agg_funcs(arg)
+        for kw in node.keywords:  # named aggregation: alias=('column', 'func') or alias='func'
+            aliases.add(kw.arg)
+            v = kw.value
+            if isinstance(v, ast.Tuple) and len(v.elts) == 2:
+                col = v.elts[0]
+                if not (isinstance(col, ast.Constant) and col.value in columns):
+                    raise AskError("A named aggregation must be ('column', 'function') with a known column.")
+                funcs += _agg_funcs(v.elts[1])
+            else:
+                funcs += _agg_funcs(v)
+        return funcs, aliases
+    for kw in node.keywords:
+        if kw.arg not in ALLOWED_KEYWORDS.get(method, set()):
+            raise AskError(f"Keyword `{kw.arg}` is not allowed for `{method}`.")
+    if method == "pivot_table":
+        if node.args:
+            raise AskError("pivot_table takes keyword arguments only (index=, columns=, values=, aggfunc=).")
+        funcs += [e for kw in node.keywords if kw.arg == "aggfunc" for e in _agg_funcs(kw.value)]
+    return funcs, aliases
 
 
 def validate(expr, df):
@@ -97,7 +143,8 @@ def validate(expr, df):
         tree = ast.parse(expr, mode="eval")
     except SyntaxError:
         raise AskError("The query is not a single pandas expression (assignments and statements are not allowed).")
-    strings = _allowed_strings(df, tree)
+    columns = set(map(str, df.columns))
+    agg_func_nodes, aliases = set(), set()
     for node in ast.walk(tree):
         if not isinstance(node, ALLOWED_NODES):
             raise AskError(f"Not allowed in a query: {type(node).__name__}.")
@@ -111,12 +158,19 @@ def validate(expr, df):
                 raise AskError("Only allow-listed DataFrame methods may be called.")
             if any(kw.arg is None or kw.arg.startswith("_") for kw in node.keywords):
                 raise AskError("Keyword unpacking and private keyword names are not allowed.")
-        if isinstance(node, ast.Constant) and isinstance(node.value, str):
-            if node.value not in strings and not _DATE.match(node.value):
-                raise AskError(f"Unknown column or value: '{node.value}'.")
+            funcs, names = _check_call(node, columns)
+            agg_func_nodes.update(map(id, funcs))
+            aliases |= names
         if isinstance(node, ast.BinOp) and any(isinstance(s, ast.Constant) and isinstance(s.value, str)
                                                for s in (node.left, node.right)):
             raise AskError("Arithmetic on text constants is not allowed.")
+    # Outside aggregation positions a string must be a column, a named-agg alias defined in this
+    # expression (a column of its result) or an allowed category value.
+    strings = columns | aliases | {v for vals in categorical_values(df).values() for v in vals}
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Constant) and isinstance(node.value, str)
+                and id(node) not in agg_func_nodes and node.value not in strings):
+            raise AskError(f"Unknown column or value: '{node.value}'.")
     return tree
 
 
@@ -158,6 +212,11 @@ def uses_scores(expr):
     return any(c in expr for c in SCORE_COLS)
 
 
+def uses_identifiers(expr):
+    """True if the expression mentions account_id or customer_id anywhere; its result then stays local."""
+    return bool(_ID_REF.search(expr))
+
+
 def strip_identifiers(result):
     """Copy of the result without account_id / customer_id (columns, index levels or a Series of ids).
     Returns None when nothing but identifiers is left. The original result is left untouched."""
@@ -173,6 +232,10 @@ def strip_identifiers(result):
     if isinstance(result, pd.DataFrame):
         result = result.drop(columns=[c for c in ID_COLS if c in result.columns])
         if result.shape[1] == 0:
+            return None
+    elif result.index.nlevels == 1 and result.index.isin(ID_COLS).any():  # a row returned as a Series
+        result = result[~result.index.isin(ID_COLS)]
+        if result.empty:
             return None
     return result
 
@@ -199,6 +262,11 @@ Rules:
   {{"expression": "<one pandas expression>", "description": "<one plain-English sentence saying what the expression computes>"}}
   The expression has no assignment, imports or lambdas. Example description: "Average default flag for unemployed borrowers".
 - Use only df, the listed columns and these methods: {methods}. Also allowed: .loc[...] and .dt.year/.month/.quarter. Access columns as df["col"].
+- Keyword arguments allowed (any other keyword is rejected): {keywords}. In agg/aggregate, keywords are
+  named-aggregation aliases: alias=("column", "func"). pivot_table takes keyword arguments only.
+- Aggregation functions are given by name only: {agg_names}. Dates are not allowed as strings; filter with .dt.year or orig_year.
+- To count accounts, use groupby(...).size() per group, or a boolean mask's .sum() for a total (len() is not available).
+  Never use the account_id or customer_id columns, to count or otherwise.
 - Use only category values exactly as listed. Keep results small (aggregate, or head(n)).
 - For "which / highest / lowest / best / worst" questions, return the sorted values, e.g.
   df.groupby("region")["target_default"].mean().sort_values(ascending=False), not idxmax/idxmin, so the answer can quote the figure.
@@ -265,7 +333,9 @@ def parse_query_reply(text):
 
 def generate_query(question, df, client):
     """Returns (validated expression, description). Only the schema reaches the model, never rows."""
-    system = QUERY_SYSTEM.format(methods=", ".join(sorted(ALLOWED_METHODS)), schema=schema_text(df))
+    keywords = "; ".join(f"{m}({', '.join(sorted(k))})" for m, k in ALLOWED_KEYWORDS.items())
+    system = QUERY_SYSTEM.format(methods=", ".join(sorted(ALLOWED_METHODS)), keywords=keywords,
+                                 agg_names=", ".join(sorted(AGG_NAMES)), schema=schema_text(df))
     text = _call(client, system, f"Question: {question}")
     text = re.sub(r"^```(?:json|python)?\s*|\s*```$", "", text).strip()
     if text.startswith("CANNOT_ANSWER"):
@@ -284,10 +354,9 @@ def answer_prompt(question, result, n_accounts, truncated=False, scores_used=Fal
     return "\n\n".join(parts)
 
 
-def answer_question(question, result, n_accounts, client, truncated=False, scores_used=False):
+def answer_question(question, result, n_accounts, client, truncated=False, scores_used=False, ids_used=False):
     if is_empty(result):
         return "The query returned no rows for this selection, so the question can't be answered from the data."
-    if strip_identifiers(result) is None:
-        return ("The result lists only account identifiers, which are not sent to the language model, "
-                "so no written answer was produced. See the table below.")
+    if ids_used or strip_identifiers(result) is None:
+        return ID_MESSAGE
     return _call(client, ANSWER_SYSTEM, answer_prompt(question, result, n_accounts, truncated, scores_used))

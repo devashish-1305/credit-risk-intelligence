@@ -46,16 +46,18 @@ Every metric here was re-computed from those saved files. The bootstrap CIs, the
 | **Champion** | Logistic regression | `bur_*` (snapshot, all lines) | **0.675** | **0.351** | **0.277** | 0.125 |
 | Challenger | LightGBM | `bur_*` (snapshot, all lines) | 0.673 | 0.345 | 0.262 | 0.125 |
 | Sensitivity | LightGBM, opened-before-origination variant | `bur_pit_*` | 0.657 | 0.315 | 0.234 | 0.127 |
+| Sensitivity | Logistic regression, opened-before-origination variant | `bur_pit_*` | 0.671 | 0.341 | 0.267 | 0.126 |
 
 **Champion / challenger:**
 - **The LR vs LightGBM difference is inconclusive.** The paired bootstrap 95% CI for AUC(LR) − AUC(LightGBM) is **−0.008 to +0.014** (`validation.py`, 2,000 resamples, seed 42; *corrected* from +0.015 in the earlier one-off check). Neither model is shown to be better.
 - **LR is the champion:** it performs on par with LightGBM and is simpler to govern, with fixed coefficients, monotone effects and an exact per-account decomposition. **LightGBM is the challenger**, kept for comparison and for its SHAP explanations.
 - **Discrimination is moderate.** An AUC around 0.67 is typical of a behavioural model on weak-to-moderate signals. These numbers are a diagnostic, not checked against a pass mark.
-- **LightGBM's first run overfit badly.** With 300 trees, the training AUC was 0.999 and the test AUC 0.633. This was diagnosed on the 2021 in-train holdout and fixed only by early-stopping the tree count. No other tuning was done. Even at 39 trees, the in-sample train AUC is 0.81 against 0.67 on test.
+- **LightGBM's first run overfit badly.** With 300 trees, the training AUC was 0.994 and the test AUC 0.633. This was diagnosed on the 2021 in-train holdout and fixed only by early-stopping the tree count. No other tuning was done. Even at 39 trees, the in-sample train AUC is 0.81 against 0.67 on test.
 
 **Opened-before-origination sensitivity variant (A2):**
 - This variant keeps only bureau lines with `date_opened ≤ origination_date`. It is **not** point-in-time: `account_status`, `outstanding_amount` and DPD remain snapshot values. For example, 2,453 kept lines are marked Closed but closed after origination, and 1,923 are Written-Off with no write-off date.
-- It scores 0.015 AUC below the challenger (bootstrap 95% CI 0.005 to 0.026, `validation.py`; *corrected* from 0.016, which was a difference of rounded AUCs: 0.6726 − 0.6573 = 0.0152).
+- **Champion (LR) variant:** the same swap on the LR champion (`bur_*` → `bur_pit_*` only; same other inputs, train/test rows and preprocessing; computed in memory, not saved) gives AUC 0.671, KS 0.267, Gini 0.341. LR primary − LR variant = +0.005 (paired bootstrap 95% CI −0.002 to +0.012, 2,000 resamples, seed 42): inconclusive. The kept lines still carry snapshot status, balance and DPD, so this does not show the champion is free of leakage.
+- The LightGBM variant scores 0.015 AUC below the challenger (bootstrap 95% CI 0.005 to 0.026, `validation.py`; *corrected* from 0.016, which was a difference of rounded AUCs: 0.6726 − 0.6573 = 0.0152).
 - **This is a sensitivity result, not a lower bound.** The filter removes real history (23.7% of test accounts have no kept lines, vs 10.2% with no bureau lines at all), and the kept lines still carry snapshot information. Neither AUC is the true month-3 figure.
 
 ## Decile table (LR champion, test)
@@ -174,7 +176,7 @@ LightGBM challenger (`validation.py`; the LR table is in `validation.json`). "Fl
    - On those accounts, AUC is 0.656 vs 0.684 for customers new to the test set (LightGBM). These are different populations, so this comparison cannot show whether the overlap inflates AUC.
    - **Grouped retrain (`validation.py`):** we dropped the 2,255 train rows of shared customers (9,764 → 7,509) and scored the same test set. Test AUC moved from 0.675 to 0.672 (LR) and from 0.673 to 0.658 (LightGBM). On the overlap accounts, it moved from 0.661 to 0.663 (LR) and from 0.656 to 0.650 (LightGBM).
    - **Why this is inconclusive:** the retrain also loses 23% of the training data, so a drop can't be separated from the smaller train set.
-   - Default rate is 23.3% when a customer's other loan defaulted vs 14.6% otherwise, so customer-level signal does carry across loans.
+   - Among customers with more than one loan, the default rate is 23.3% when another of the customer's loans defaulted vs 14.6% otherwise, so customer-level signal does carry across loans.
 3. **No loss-severity view.** The model ranks default probability only. The data has no recovery or LGD field, which matters most for collateralised Mortgage and Auto loans.
 4. **Calibration not formally assessed.** See the Calibration section.
 

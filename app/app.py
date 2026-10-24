@@ -176,7 +176,7 @@ with tab_ask:
             try:
                 result, truncated = ask.run_query(expr, ask_view)
                 answer = ask.answer_question(asked, result, len(ask_view), ask.get_client(), truncated,
-                                             ask.uses_scores(expr))
+                                             ask.uses_scores(expr), ask.uses_identifiers(expr))
                 st.session_state["ask_result"] = (result, truncated, answer, len(ask_view), ask.uses_scores(expr))
             except ask.AskError as e:
                 st.session_state.pop("ask_result", None)

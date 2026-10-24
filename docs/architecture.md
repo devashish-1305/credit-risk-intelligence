@@ -45,4 +45,5 @@ What would change for a real bank (assumptions in [assumptions.md](assumptions.m
 - **Access control:** authentication, role-based access to accounts and the Ask tab, audit logs of questions,
   queries and results.
 - **Approved LLM endpoint:** a provider and data-sharing terms approved by the bank, hosted or routed as
-  its policy requires; only the schema and aggregate results leave the environment.
+  its policy requires; only the schema and query results leave the environment. A result whose query
+  mentions `account_id` or `customer_id` is never sent; it is shown locally with a fixed message.

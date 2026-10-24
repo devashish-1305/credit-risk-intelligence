@@ -15,7 +15,7 @@ Code: `src/ask.py` (logic) and `app/app.py` (tab). Tests: `tests/test_ask.py` (t
 | 3. Validate | An AST allow-list check (below). Anything that fails is rejected with a reason and never runs. | — |
 | 4. Review (human in the loop) | The description ("This query will compute: …") is shown, with the expression in a collapsed "Show query" expander. The description is written by the model; the expression is what runs. Nothing runs until the user clicks **Run query**. | — |
 | 5. Execute | The query is validated again and evaluated with empty `__builtins__` and only `df` in scope. The result is capped at 50 rows. | — |
-| 6. Answer | The second call writes 1–3 sentences in which every number must come from the result. An empty result returns a fixed "no rows" message without a model call. | The question, the result (≤ 50 rows) and the account count. `account_id` and `customer_id` are removed first (columns or index levels); the table in the app keeps the full result. |
+| 6. Answer | The second call writes 1–2 sentences in which every number must come from the result. An empty result returns a fixed "no rows" message without a model call. | The question, the result (≤ 50 rows) and the account count. `account_id` and `customer_id` are removed first (columns or index levels); the table in the app keeps the full result. |
 
 `df` is the master table (14,685 accounts, one row per account, with income and age bands), left-joined
 with the champion LR's `score_lr`, `decile_lr` and `risk_band`. These three columns exist only for
@@ -50,8 +50,25 @@ was generated, **Run query** uses the current filters, and the account count sho
   `ALLOWED_METHODS`). Non-call attributes are limited to `loc`, `dt`, `year`, `month` and `quarter`.
   The check applies at every link of a method chain, so `apply`, `pipe`, `eval`, `query`, `map` and
   `transform` are rejected wherever they appear.
-- **Strings:** each must be a known column, an allowed category value, an aggregation name, a named-agg
-  alias defined in the same expression, or a date (`YYYY-MM[-DD]`). Unknown columns are rejected.
+- **Strings, by position:** in `.agg()`/`.aggregate()` arguments, the function half of a named-agg tuple
+  (`alias=("column", "func")`) and `pivot_table(aggfunc=...)`, only `mean`, `sum`, `count`, `min`, `max`,
+  `median`, `std`, `nunique`, `size`, `first` and `last` are accepted. Any other string there, including a
+  column name, is rejected. Everywhere else a string must be a known column, a named-agg alias defined in
+  the same expression, or an allowed category value. Aggregation names, keyword names and dates are not
+  accepted as strings outside those positions. `pivot_table` takes keyword arguments only.
+- **Keywords:** only `sort_values(by, ascending)`, `sort_index(ascending)`,
+  `value_counts(normalize, ascending, dropna)`, `head(n)`, `tail(n)`, `nlargest(n, columns)`,
+  `nsmallest(n, columns)`, `reset_index(drop)`, `round(decimals)` and
+  `pivot_table(index, columns, values, aggfunc)`. In `agg`/`aggregate` the keywords are named-agg aliases.
+  Any other keyword is rejected.
+- **Identifiers:** if the expression mentions `account_id` or `customer_id` anywhere, the answer model is
+  not called. The result table is shown in the app with the fixed message "This query uses account or
+  customer identifiers, so the result is shown in the table only and not sent to the answer model." This
+  includes counts such as `agg(n=("account_id", "size"))`; the query prompt tells the model to count with
+  `groupby(...).size()` or a boolean mask's `.sum()` instead. For other queries, `account_id` and
+  `customer_id` are removed from the result before the answer call: as columns, as index levels, and as
+  index labels of a Series. The last case covers a whole row returned as a Series, such as
+  `df.loc[df["loan_amount"].idxmax()]`.
 - **Syntax:** comparisons, `&`/`|`/`~`, and `+ - * / // %` on numbers. No assignments, lambdas,
   comprehensions, dicts, dunder or private attributes, or `**kwargs`. Expressions are limited to 600 characters.
 - **Result:** must be a DataFrame, a Series or a scalar. Anything else, such as a GroupBy object or a
@@ -82,6 +99,11 @@ with a dict (`rename(columns={...})`) is blocked for the same reason, because di
 allowed. **Mitigation:** the user can rephrase (for example, "by origination year" works through
 `orig_year`), or a reviewer can add the method to `ALLOWED_METHODS` after checking that it cannot run
 code.
+
+Date-string comparisons are blocked too. `df[df["origination_date"] >= "2022-01-01"]` is rejected with
+"Unknown column or value: '2022-01-01'", because strings must be columns, aliases or category values.
+**Mitigation:** filter with `df["origination_date"].dt.year >= 2022` or `df["orig_year"] >= 2022`. The query
+prompt tells the model to do this.
 
 ## Human-in-the-loop step
 
