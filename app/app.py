@@ -4,9 +4,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import pandas as pd
 import plotly.express as px
 import streamlit as st
 
+from src import ask
 from src import dashboard as d
 from src.model import BAND_LABELS
 
@@ -18,12 +20,12 @@ st.set_page_config(page_title="Credit Risk Intelligence", layout="wide")
 
 @st.cache_data
 def load_all():
-    portfolio = d.load_portfolio()
-    return (portfolio, d.scored_test(portfolio, d.load_test_scores()),
-            d.load_lr_drivers(), d.load_model_summary())
+    portfolio, scores = d.load_portfolio(), d.load_test_scores()
+    return (portfolio, d.scored_test(portfolio, scores), d.load_lr_drivers(), d.load_model_summary(),
+            ask.build_ask_frame(portfolio, scores))
 
 
-portfolio, test, lr_drivers, summary = load_all()
+portfolio, test, lr_drivers, summary, ask_df = load_all()
 
 # --- sidebar filters (applied to every tab) ---------------------------------
 st.sidebar.header("Filters")
@@ -148,4 +150,47 @@ with tab_account:
 
 # --- Ask the Portfolio ------------------------------------------------------
 with tab_ask:
-    st.info("Ask the Portfolio is coming in the next step.")
+    ask_view = d.apply_filters(ask_df, selections)
+    st.caption("Ask a question about the portfolio. The model writes a pandas query from the column list only "
+               "(it never sees account rows); you review it and click Run query; the answer uses only the result.")
+    with st.form("ask_form", border=False):
+        question = st.text_input("Question", placeholder="e.g. Default rate by region, highest first")
+        submitted = st.form_submit_button("Generate query")
+    ask.clear_stale(st.session_state, question)
+    if submitted and question.strip():
+        st.session_state.pop("ask_result", None)
+        try:
+            expr, description = ask.generate_query(question, ask_view, ask.get_client())
+            st.session_state["ask_query"] = (question.strip(), expr, description)
+        except ask.AskError as e:
+            st.session_state.pop("ask_query", None)
+            st.error(str(e))
+
+    if "ask_query" in st.session_state:
+        asked, expr, description = st.session_state["ask_query"]
+        with st.expander("Show query"):
+            st.code(expr, language="python")
+        st.markdown(f"**This query will compute:** {description}")
+        st.caption("Written by the model — the query is what runs.")
+        if st.button("Run query"):
+            try:
+                result, truncated = ask.run_query(expr, ask_view)
+                answer = ask.answer_question(asked, result, len(ask_view), ask.get_client(), truncated,
+                                             ask.uses_scores(expr))
+                st.session_state["ask_result"] = (result, truncated, answer, len(ask_view), ask.uses_scores(expr))
+            except ask.AskError as e:
+                st.session_state.pop("ask_result", None)
+                st.error(str(e))
+
+    if "ask_result" in st.session_state:
+        result, truncated, answer, n, scores_used = st.session_state["ask_result"]
+        st.markdown(f"**Answer:** {answer}")
+        st.caption(f"Answered on {n:,} accounts (current sidebar filters).")
+        if scores_used:
+            st.caption("Score, decile and risk band figures cover 2022-23 test accounts only.")
+        if isinstance(result, (pd.DataFrame, pd.Series)):
+            st.dataframe(result, width="stretch")
+            if truncated:
+                st.caption(f"Result capped at the first {ask.MAX_ROWS} rows.")
+        else:
+            st.write(result)

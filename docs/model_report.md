@@ -6,7 +6,7 @@ Source: `src/model.py` (`python -m src.model`). Artifacts in `data/processed/`:
 - `test_lr_drivers.parquet`: the top-5 signed LR contributions per test account (champion)
 - `test_shap_drivers.parquet`: the top-5 SHAP drivers per test account (LightGBM challenger)
 
-Every metric here was re-computed from those saved files. Figures marked *(audit check)* come from a separate review script, not the pipeline; they are reproducible from the saved scores, except the grouped retrain, which refits the models.
+Every metric here was re-computed from those saved files. The bootstrap CIs, the grouped retrain and the fairness table come from `src/validation.py` (`python -m src.validation`, fixed seed 42), which writes `data/processed/validation.json`. Moving them into the pipeline changed two figures; both are marked *(corrected)* below.
 
 ## What the model is (and is not)
 - **Scored at month 3 after origination.** It uses loan and customer attributes, bureau aggregates, and repayment behaviour in months 1–3 (`rep_m3_*`).
@@ -48,14 +48,14 @@ Every metric here was re-computed from those saved files. Figures marked *(audit
 | Sensitivity | LightGBM, opened-before-origination variant | `bur_pit_*` | 0.657 | 0.315 | 0.234 | 0.127 |
 
 **Champion / challenger:**
-- **The LR vs LightGBM difference is inconclusive.** The paired bootstrap 95% CI for AUC(LR) − AUC(LightGBM) is **−0.008 to +0.015** *(audit check, 2,000 resamples)*. Neither model is shown to be better.
+- **The LR vs LightGBM difference is inconclusive.** The paired bootstrap 95% CI for AUC(LR) − AUC(LightGBM) is **−0.008 to +0.014** (`validation.py`, 2,000 resamples, seed 42; *corrected* from +0.015 in the earlier one-off check). Neither model is shown to be better.
 - **LR is the champion:** it performs on par with LightGBM and is simpler to govern, with fixed coefficients, monotone effects and an exact per-account decomposition. **LightGBM is the challenger**, kept for comparison and for its SHAP explanations.
 - **Discrimination is moderate.** An AUC around 0.67 is typical of a behavioural model on weak-to-moderate signals. These numbers are a diagnostic, not checked against a pass mark.
 - **LightGBM's first run overfit badly.** With 300 trees, the training AUC was 0.999 and the test AUC 0.633. This was diagnosed on the 2021 in-train holdout and fixed only by early-stopping the tree count. No other tuning was done. Even at 39 trees, the in-sample train AUC is 0.81 against 0.67 on test.
 
 **Opened-before-origination sensitivity variant (A2):**
 - This variant keeps only bureau lines with `date_opened ≤ origination_date`. It is **not** point-in-time: `account_status`, `outstanding_amount` and DPD remain snapshot values. For example, 2,453 kept lines are marked Closed but closed after origination, and 1,923 are Written-Off with no write-off date.
-- It scores 0.016 AUC below the challenger (bootstrap 95% CI 0.005 to 0.026, *audit check*).
+- It scores 0.015 AUC below the challenger (bootstrap 95% CI 0.005 to 0.026, `validation.py`; *corrected* from 0.016, which was a difference of rounded AUCs: 0.6726 − 0.6573 = 0.0152).
 - **This is a sensitivity result, not a lower bound.** The filter removes real history (23.7% of test accounts have no kept lines, vs 10.2% with no bureau lines at all), and the kept lines still carry snapshot information. Neither AUC is the true month-3 figure.
 
 ## Decile table (LR champion, test)
@@ -136,7 +136,7 @@ The dashboard will show **risk bands, not probabilities**. The cut points are th
 - **Excluding `gender` and `marital_status` from the inputs does not establish fairness.** Other inputs can act as proxies, and outcomes can still differ across groups.
 - **No claim of regulatory compliance is made.** These are diagnostic figures only.
 
-LightGBM challenger *(audit check)*. "Flagged" means scored in the top 30% of test scores:
+LightGBM challenger (`validation.py`; the LR table is in `validation.json`). "Flagged" means scored in the top 30% of test scores. The oldest band is ages 56 and over; it was labelled "55+" before, which overlapped with 46–55 (same 271 accounts, label corrected):
 
 | Group | n | Default rate | Flag rate | True-positive rate | False-positive rate | AUC |
 |---|---|---|---|---|---|---|
@@ -144,12 +144,12 @@ LightGBM challenger *(audit check)*. "Flagged" means scored in the top 30% of te
 | Age 26–35 | 1,369 | 18.2% | 41.3% | 61.4% | 36.8% | 0.680 |
 | Age 36–45 | 1,747 | 13.9% | 25.6% | 46.3% | 22.3% | 0.663 |
 | Age 46–55 | 900 | 12.9% | 10.1% | 25.0% | 7.9% | 0.645 |
-| Age 55+ | 271 | 10.0% | 6.3% | 11.1% | 5.7% | **0.557** |
+| Age 56+ | 271 | 10.0% | 6.3% | 11.1% | 5.7% | **0.557** |
 | Female | 2,135 | 15.8% | 29.2% | 50.1% | 25.3% | 0.664 |
 | Male | 2,786 | 15.9% | 30.7% | 52.4% | 26.5% | 0.679 |
 
-- **Age:** the flag rate is 56% for ≤25 against 6% for 55+, and the false-positive rate 52% against 6%. Part of the gap reflects real differences in default rate (23% against 10%). Ranking is weak for 55+ (AUC 0.557, n=271).
-- **The LR champion shows the same pattern:** flag rate 58% against 5%, and 55+ AUC 0.582. In risk bands, 24% of ≤25 accounts land in Very High against 1.5% of 55+.
+- **Age:** the flag rate is 56% for ≤25 against 6% for 56+, and the false-positive rate 52% against 6%. Part of the gap reflects real differences in default rate (23% against 10%). Ranking is weak for 56+ (AUC 0.557, n=271).
+- **The LR champion shows the same pattern:** flag rate 58% against 5%, and 56+ AUC 0.582. In risk bands, 24% of ≤25 accounts land in Very High against 1.5% of 56+.
 - **Gender:** flag and error rates are close (false-positive rate 25% Female, 27% Male).
 - `age` is the #4 SHAP feature and ranks 12th of 85 LR coefficients by size.
 
@@ -157,7 +157,7 @@ LightGBM challenger *(audit check)*. "Flagged" means scored in the top 30% of te
 1. Is age allowed as an input under the target jurisdiction's credit rules, and is the "statistically derived model" exemption documented?
 2. Should a model without age be compared on AUC and on disparity across age bands?
 3. Is `years_employed` capped at age − 14 acting as an age proxy? Its correlation with age is only 0.08, but the capped flag applies to 736 accounts.
-4. Can the model be relied on for customers 55+, given AUC 0.557 and n=271?
+4. Can the model be relied on for customers 56+, given AUC 0.557 and n=271?
 5. Which fairness metric governs: flag rate, false-positive rate, or calibration within each group?
 6. Whether to use the protected attributes in the fairness review only, which they currently are.
 
@@ -170,7 +170,7 @@ LightGBM challenger *(audit check)*. "Flagged" means scored in the top 30% of te
 2. **Customer overlap (limitation L1). Effect on test AUC is inconclusive.**
    - 1,881 customers have loans in both train and test, so 2,070 of the 4,921 test accounts (42%) belong to a customer the model saw in training, with identical `bur_*` values.
    - On those accounts, AUC is 0.656 vs 0.684 for customers new to the test set (LightGBM). These are different populations, so this comparison cannot show whether the overlap inflates AUC.
-   - **Grouped retrain *(audit check)*:** we dropped the 2,255 train rows of shared customers (9,764 → 7,509) and scored the same test set. Test AUC moved from 0.675 to 0.672 (LR) and from 0.673 to 0.658 (LightGBM). On the overlap accounts, it moved from 0.661 to 0.663 (LR) and from 0.656 to 0.650 (LightGBM).
+   - **Grouped retrain (`validation.py`):** we dropped the 2,255 train rows of shared customers (9,764 → 7,509) and scored the same test set. Test AUC moved from 0.675 to 0.672 (LR) and from 0.673 to 0.658 (LightGBM). On the overlap accounts, it moved from 0.661 to 0.663 (LR) and from 0.656 to 0.650 (LightGBM).
    - **Why this is inconclusive:** the retrain also loses 23% of the training data, so a drop can't be separated from the smaller train set.
    - Default rate is 23.3% when a customer's other loan defaulted vs 14.6% otherwise, so customer-level signal does carry across loans.
 3. **No loss-severity view.** The model ranks default probability only. The data has no recovery or LGD field, which matters most for collateralised Mortgage and Auto loans.
