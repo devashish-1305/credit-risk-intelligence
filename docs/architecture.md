@@ -1,29 +1,28 @@
 # Architecture
 
+### Pipeline
+
 ```mermaid
-flowchart LR
-    A[Raw CSVs<br/>5 tables] --> B[Ingest and clean<br/>src/ingest.py]
-    B --> C[Master table<br/>1 row per account<br/>src/master.py]
-    C --> D[Analytics<br/>src/analytics.py]
-    C --> E[Model<br/>LR champion<br/>LightGBM challenger<br/>src/model.py]
-    E --> F[Validation<br/>src/validation.py]
-    D --> G[Streamlit dashboard<br/>app/app.py]
-    E --> G
-    F --> G
+flowchart TD
+    A[Raw data<br/>5 CSVs] --> B[Ingest & clean]
+    B --> C[Master table]
+    C --> D[Analytics]
+    C --> E[Model & validation<br/>LR champion, LightGBM challenger]
+    D --> F[Streamlit dashboard]
+    E --> F
+```
 
-    subgraph ask [Ask the Portfolio]
-        direction LR
-        Q[User question] --> L1[LLM call 1<br/>schema only, no rows]
-        L1 --> AL{AST<br/>allow-list}
-        AL -- rejected --> X[Reason shown,<br/>nothing runs]
-        AL -- passed --> H[Human reviews<br/>and clicks Run query]
-        H --> P[pandas on local data]
-        P --> L2[LLM call 2<br/>question and result only]
-        L2 --> ANS[Answer and query shown]
-    end
+### Ask the Portfolio
 
-    G --- Q
-    C -. local data .-> P
+```mermaid
+flowchart TD
+    Q[Question] --> L1[LLM call 1<br/>schema only]
+    L1 --> AL{Allow-list check}
+    AL -- rejected --> X[Stop with reason]
+    AL -- passed --> H[Human clicks<br/>Run query]
+    H --> P[pandas on<br/>local data]
+    P --> L2[LLM call 2<br/>result only]
+    L2 --> ANS[Answer]
 ```
 
 | Stage | What it does | Tools | Key outputs | Controls |
