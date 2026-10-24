@@ -48,7 +48,7 @@ pip install -r requirements.txt
 brew install libomp          # macOS only: LightGBM needs OpenMP
 ```
 
-If you use Anaconda, run conda deactivate before activating .venv, or use the python -m forms above.
+If you use Anaconda, run conda deactivate before activating .venv, or use the python -m forms below.
 
 ### Data
 
