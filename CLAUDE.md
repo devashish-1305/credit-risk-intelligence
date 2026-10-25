@@ -37,7 +37,7 @@ One sub-problem at a time. After each:
 1. Test: 3–5 pytest asserts in tests/; don't proceed until green.
 2. Complexity gate: propose simple vs richer option, I choose. Serves a deliverable?
    Explainable in 2 lines? Realistic for a bank? >45 min → simplify, log in docs/limitations.md.
-3. Neutral language: personal portfolio project. No company names or hiring-process words anywhere.
+3. Neutral language: personal portfolio project. No company names or non-neutral wording anywhere.
 - Log data fixes → docs/dq_notes.md, assumptions → docs/assumptions.md
 - PLAN.md changes only if a test or the data contradicts it
 - Commits: short messages, never add Co-Authored-By lines. Commit only when I ask.

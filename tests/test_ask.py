@@ -99,6 +99,18 @@ def test_string_and_keyword_policy_rejects(expr, df):
 
 
 @pytest.mark.parametrize("expr", [
+    "[0] * 999999999",                     # list repetition (memory exhaustion)
+    "999999999 * [0]",
+    "(0,) * 999999999",                    # tuple repetition
+    "'a' * 999999999",                     # string repetition
+    "df['region'].isin(['North'] * 999999999)",
+])
+def test_list_tuple_and_string_arithmetic_is_rejected(expr, df):
+    with pytest.raises(ask.AskError, match="Arithmetic on lists, tuples or text constants"):
+        ask.validate(expr, df)  # validator only; never executed
+
+
+@pytest.mark.parametrize("expr", [
     "df.groupby('region')['loan_amount'].agg(['mean', 'count'])",
     "df.pivot_table(index='region', columns='loan_type', values='target_default', aggfunc='mean')",
     "df.groupby('region')['loan_amount'].sum().nlargest(n=2).round(decimals=1)",

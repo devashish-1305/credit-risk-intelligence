@@ -33,8 +33,7 @@ def profile_by(df, by):
     """Segment profile: accounts, exposure, default rate, relative risk.
 
     relative_risk = segment default rate / portfolio default rate. The
-    exposure-weighted... no, the *account*-count-weighted average of
-    relative_risk across all segments of a column is exactly 1.0, since it
+    account-count-weighted average of relative_risk across all segments of a column is exactly 1.0, since it
     reduces to (sum of segment defaults) / (n_accounts * portfolio_rate).
     """
     overall_rate = df["target_default"].mean()

@@ -151,8 +151,8 @@ with tab_account:
 # --- Ask the Portfolio ------------------------------------------------------
 with tab_ask:
     ask_view = d.apply_filters(ask_df, selections)
-    st.caption("Ask a question about the portfolio. The model writes a pandas query from the column list only "
-               "(it never sees account rows); you review it and click Run query; the answer uses only the result.")
+    st.caption("Ask a question about the portfolio. The query-writing model sees only the column list, never "
+               "account rows; you review the query and click Run query; the answer uses only the result.")
     with st.form("ask_form", border=False):
         question = st.text_input("Question", placeholder="e.g. Default rate by region, highest first")
         submitted = st.form_submit_button("Generate query")

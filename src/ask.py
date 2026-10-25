@@ -161,9 +161,10 @@ def validate(expr, df):
             funcs, names = _check_call(node, columns)
             agg_func_nodes.update(map(id, funcs))
             aliases |= names
-        if isinstance(node, ast.BinOp) and any(isinstance(s, ast.Constant) and isinstance(s.value, str)
-                                               for s in (node.left, node.right)):
-            raise AskError("Arithmetic on text constants is not allowed.")
+        if isinstance(node, ast.BinOp) and any(
+                isinstance(s, (ast.List, ast.Tuple)) or (isinstance(s, ast.Constant) and isinstance(s.value, str))
+                for s in (node.left, node.right)):  # blocks list/string repetition such as [0] * 10**9
+            raise AskError("Arithmetic on lists, tuples or text constants is not allowed.")
     # Outside aggregation positions a string must be a column, a named-agg alias defined in this
     # expression (a column of its result) or an allowed category value.
     strings = columns | aliases | {v for vals in categorical_values(df).values() for v in vals}
